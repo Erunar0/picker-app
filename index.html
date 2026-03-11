@@ -4885,65 +4885,65 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && !location.
 }
 </script>
 
+<script>
 // ── Android Geri Tuşu Desteği ─────────────────────────────────────────────
 (function(){
-  // Modal, panel veya viewer açıkken geri tuşuna basılınca kapat
-  function _pushBackState() {
-    history.pushState({ picker: true }, '');
+  function _hasOpenPanel() {
+    if(document.getElementById('cpkOverlay')?.classList.contains('open')) return true;
+    if(document.getElementById('patchViewer')?.style.opacity === '1') return true;
+    if(document.getElementById('viewer')?.classList.contains('open')) return true;
+    if(document.getElementById('modal')?.classList.contains('open')) return true;
+    if(document.getElementById('colorSharePanel')) return true;
+    if(document.getElementById('drawTemplatePanel')?.style.display !== 'none') return true;
+    if(document.getElementById('_drawPalSheet')) return true;
+    return false;
   }
 
-  // Modal açıldığında history state push et
+  function _closeTopPanel() {
+    if(document.getElementById('cpkOverlay')?.classList.contains('open')) { closeCPK(); return; }
+    if(document.getElementById('patchViewer')?.style.opacity === '1') { closePatchViewer(); return; }
+    if(document.getElementById('viewer')?.classList.contains('open')) { closeViewer(); return; }
+    if(document.getElementById('modal')?.classList.contains('open')) { closeModal(); return; }
+    const sharePanel = document.getElementById('colorSharePanel');
+    if(sharePanel) { sharePanel.remove(); const bd = document.querySelector('[style*="rgba(0,0,0,.5)"]'); if(bd) bd.remove(); return; }
+    const tmplPanel = document.getElementById('drawTemplatePanel');
+    if(tmplPanel && tmplPanel.style.display !== 'none') { closeDrawTemplates(); return; }
+    const drawPalSheet = document.getElementById('_drawPalSheet');
+    if(drawPalSheet) { drawPalSheet.remove(); return; }
+  }
+
   const _origOpenModal = window.openModal;
   window.openModal = function(hex, patchSrc, cxPct, cyPct) {
     _origOpenModal(hex, patchSrc, cxPct, cyPct);
-    _pushBackState();
+    history.pushState({ picker: true }, '');
   };
 
-  // Viewer açıldığında
   const _origOpenViewer = window.openViewer;
   window.openViewer = function() {
     _origOpenViewer();
-    _pushBackState();
+    history.pushState({ picker: true }, '');
   };
 
-  // CPK açıldığında
   const _origOpenCPK = window.openCPK;
   window.openCPK = function(initColor, cb) {
     _origOpenCPK(initColor, cb);
-    _pushBackState();
+    history.pushState({ picker: true }, '');
   };
 
   window.addEventListener('popstate', function(e) {
-    // Önce açık olan en üst katmanı kapat
-    if(document.getElementById('cpkOverlay')?.classList.contains('open')) {
-      closeCPK(); return;
+    if(_hasOpenPanel()) {
+      _closeTopPanel();
+      history.pushState({ picker: true }, '');
     }
-    if(document.getElementById('patchViewer')?.style.opacity === '1') {
-      closePatchViewer(); history.pushState({picker:true},''); return;
-    }
-    if(document.getElementById('viewer')?.classList.contains('open')) {
-      closeViewer(); history.pushState({picker:true},''); return;
-    }
-    if(document.getElementById('modal')?.classList.contains('open')) {
-      closeModal(); history.pushState({picker:true},''); return;
-    }
-    // colorSharePanel veya drawTemplatePanel
-    const sharePanel = document.getElementById('colorSharePanel');
-    if(sharePanel) { sharePanel.remove(); const bd = document.querySelector('[style*="rgba(0,0,0,.5)"]'); if(bd) bd.remove(); history.pushState({picker:true},''); return; }
-    const tmplPanel = document.getElementById('drawTemplatePanel');
-    if(tmplPanel && tmplPanel.style.display !== 'none') { closeDrawTemplates(); history.pushState({picker:true},''); return; }
-    const drawPalSheet = document.getElementById('_drawPalSheet');
-    if(drawPalSheet) { drawPalSheet.remove(); history.pushState({picker:true},''); return; }
-    // Hiçbir panel yoksa — uygulamadan çık
-    // history.back() yerine hiçbir şey yapma (uygulama kapanır — doğal davranış)
   });
 
-  // Sayfa yüklendiğinde bir state push et (ilk geri tuşu uygulamayı kapatmasın, önce kontrol etsin)
   window.addEventListener('load', () => {
     history.replaceState({ picker: true }, '');
   });
-})(););
+})();
+</script>
 
+<script>
 // ── visualViewport — Klavye Layout Düzeltme ───────────────────────────────
 (function(){
   if(!window.visualViewport) return;
@@ -5005,6 +5005,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:' && !location.
     if(typeof _saveDrawState === 'function') _saveDrawState();
   }, {passive:true});
 })();
+</script>
 
 <script>
 function initSwipe(){
@@ -5053,7 +5054,6 @@ function initSwipe(){
   window.goTab = function(id){
     const idx = TAB_IDS.indexOf(id);
     if(idx < 0 || idx === prevTabIdx) return;
-    // Alt bar geçişi — atlanan sekme sayısına göre hız (maks 550ms)
     const dist = Math.abs(idx - prevTabIdx);
     const navSpeed = Math.min(550, 280 + dist * 70);
     snapTo(idx, 0, navSpeed);
@@ -5061,46 +5061,41 @@ function initSwipe(){
 
   initPositions();
 
-  // Pointer swipe
+  // Ortak swipe state
   let sx, sy, si, dx, velX, lx, lt, dragging, vlock;
 
-  let _capturedId = null;
+  function _shouldIgnoreTarget(target) {
+    return target.closest('input,button,select,textarea,canvas,.bnav,#drawPaletteWrap,#drawPaletteBar,#drawPaletteColors,#wallSlider,#pillsWrap,#pillsInner');
+  }
 
-  pages.addEventListener('pointerdown', e => {
-    if(e.target.closest('input,button,select,textarea,canvas,.bnav,#drawPaletteWrap,#drawPaletteBar,#drawPaletteColors,#wallSlider,#pillsWrap,#pillsInner')) return;
-    sx=e.clientX; sy=e.clientY; si=prevTabIdx;
-    dx=0; velX=0; lx=e.clientX; lt=Date.now();
+  function _onStart(clientX, clientY) {
+    sx=clientX; sy=clientY; si=prevTabIdx;
+    dx=0; velX=0; lx=clientX; lt=Date.now();
     dragging=false; vlock=false;
-    _capturedId = e.pointerId;
-    // setPointerCapture YOK — drag başlayınca yapılacak
-  }, {passive:true});
+  }
 
-  pages.addEventListener('pointermove', e => {
+  function _onMove(clientX, clientY) {
     if(sx===undefined) return;
-    const ddx=e.clientX-sx, ddy=e.clientY-sy;
+    const ddx=clientX-sx, ddy=clientY-sy;
     if(!dragging && !vlock){
       if(Math.abs(ddy) > Math.abs(ddx)+4){ vlock=true; return; }
-      if(Math.abs(ddx) > 8){
-        dragging=true;
-        // Sadece gerçek sürüklemede pointer'ı yakala
-        try { pages.setPointerCapture(_capturedId); } catch(e){}
-      }
+      if(Math.abs(ddx) > 8){ dragging=true; }
     }
     if(vlock||!dragging) return;
     const now=Date.now(), dt=now-lt;
-    if(dt>0) velX=(e.clientX-lx)/dt;
-    lx=e.clientX; lt=now;
-    const atEdge=(si===0&&ddx>0)||(si===N-1&&ddx<0);
-    dx = ddx*(atEdge?0.25:1);
+    if(dt>0) velX=(clientX-lx)/dt;
+    lx=clientX; lt=now;
+    const atEdge=(si===0&&(clientX-sx)>0)||(si===N-1&&(clientX-sx)<0);
+    dx = (clientX-sx)*(atEdge?0.25:1);
     const pct=dx/pages.offsetWidth*100;
     getSlides().forEach((s,i)=>{
       if(!s) return;
       s.style.transition='none';
       s.style.transform=`translate3d(${(i-si)*100+pct}%,0,0)`;
     });
-  }, {passive:true});
+  }
 
-  const end = () => {
+  function _onEnd() {
     if(sx===undefined) return;
     if(!dragging){ sx=undefined; return; }
     const W=pages.offsetWidth, pct=dx/W;
@@ -5108,11 +5103,44 @@ function initSwipe(){
     if((pct<-0.25||velX<-0.5)&&si<N-1) ti=si+1;
     else if((pct>0.25||velX>0.5)&&si>0) ti=si-1;
     snapTo(ti, velX);
-    sx=undefined; dragging=false; vlock=false; _capturedId=null;
-  };
+    sx=undefined; dragging=false; vlock=false;
+  }
 
-  pages.addEventListener('pointerup',     end, {passive:true});
-  pages.addEventListener('pointercancel', end, {passive:true});
+  // Pointer events (masaüstü + modern mobil)
+  let _capturedId = null;
+  pages.addEventListener('pointerdown', e => {
+    if(_shouldIgnoreTarget(e.target)) return;
+    _capturedId = e.pointerId;
+    _onStart(e.clientX, e.clientY);
+  }, {passive:true});
+
+  pages.addEventListener('pointermove', e => {
+    if(e.pointerId !== _capturedId) return;
+    if(dragging) { try { pages.setPointerCapture(_capturedId); } catch(err){} }
+    _onMove(e.clientX, e.clientY);
+  }, {passive:true});
+
+  const pEnd = () => { _capturedId=null; _onEnd(); };
+  pages.addEventListener('pointerup',     pEnd, {passive:true});
+  pages.addEventListener('pointercancel', pEnd, {passive:true});
+
+  // Touch events (Android TWA fallback)
+  pages.addEventListener('touchstart', e => {
+    if(_shouldIgnoreTarget(e.target)) return;
+    const t = e.touches[0];
+    _onStart(t.clientX, t.clientY);
+  }, {passive:true});
+
+  pages.addEventListener('touchmove', e => {
+    if(sx===undefined) return;
+    const t = e.touches[0];
+    _onMove(t.clientX, t.clientY);
+    // Sadece yatay sürüklemede sayfanın scroll'unu engelle
+    if(dragging) { try { e.preventDefault(); } catch(err){} }
+  }, {passive:false});
+
+  pages.addEventListener('touchend',    _onEnd, {passive:true});
+  pages.addEventListener('touchcancel', _onEnd, {passive:true});
 }
 
 // DOM hazır olunca başlat
